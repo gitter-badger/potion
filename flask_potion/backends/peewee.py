@@ -226,7 +226,11 @@ class PeeweeManager(Manager):
 
     def read(self, id):
         try:
-            return self.model.get(self.id_column == id)
+            query = self._query()
+            if query is None:
+                raise ItemNotFound(self.resource, id=id)
+
+            return query.where(self.id_column == id).get()
         except self.model.DoesNotExist:
             raise ItemNotFound(self.resource, id=id)
 

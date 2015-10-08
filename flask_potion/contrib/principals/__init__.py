@@ -1,11 +1,13 @@
 import six
+from sqlalchemy import or_
+from sqlalchemy.orm.attributes import ScalarObjectAttributeImpl
 from sqlalchemy.orm.collections import InstrumentedList
 from sqlalchemy.orm.exc import NoResultFound
 from werkzeug.exceptions import Forbidden
 from werkzeug.utils import cached_property
 from flask_principal import Permission, RoleNeed
 
-from flask_potion.resource import ModelResource
+from flask_potion.resource import ModelResource, ModelResourceMeta
 from flask_potion.fields import ToOne
 from flask_potion.backends import Pagination
 from flask_potion.exceptions import ItemNotFound
@@ -24,14 +26,76 @@ PERMISSION_DEFAULTS = (
 DEFAULT_METHODS = ('read', 'create', 'update', 'delete')
 
 
-class PrincipalManager(SQLAlchemyManager):
+def principals(manager):
+    class PrincipalsManager(PrincipalMixin, manager):
+        pass
 
-    def __init__(self, resource, model):
-        super(PrincipalManager, self).__init__(resource, model)
+    return PrincipalsManager
 
+
+class SQLAlchemyPrincipalsImpl:
+
+    @staticmethod
+    def _expression_for_hybrid_need(need):
+        ids = list(need.identity_get_item_needs())
+
+        if not ids:
+            return None
+
+        if len(need.fields) == 0:
+            return need.resource.manager.id_column.in_(ids)
+
+        reversed_fields = reversed(need.fields)
+
+        target_field = next(reversed_fields)
+        target_relationship = getattr(target_field.resource.manager.model, target_field.attribute)
+
+        expression = target_relationship.has(target_field.target.manager.id_column.in_(ids))
+
+        for field in reversed_fields:
+            relationship = getattr(field.resource.manager.model, field.attribute)
+
+            if isinstance(relationship.impl, ScalarObjectAttributeImpl):
+                expression = relationship.has(expression)
+            else:
+                expression = relationship.any(expression)
+
+        return expression
+
+    @classmethod
+    def filter_permission(cls, query, permission):
+        if permission.can():
+            return query
+
+        # filters must not be applied if not present:
+        if not permission.hybrid_needs:
+            return None
+
+        expressions = []
+
+        for need in permission.hybrid_needs:
+            expression = cls._expression_for_hybrid_need(need)
+            if expression is not None:
+                expressions.append(expression)
+
+        if not expressions:
+            return None
+        if len(expressions) == 1:
+            return query.filter(expressions.pop())
+        else:
+            return query.filter(or_(*expressions))
+
+        return query
+
+
+class PrincipalMixin(object):
+
+    def __init__(self, *args, **kwargs):
+        super(PrincipalMixin, self).__init__(*args, **kwargs)
         raw_needs = dict(PERMISSION_DEFAULTS)
-        raw_needs.update(resource.meta.get('permissions', {}))
+        raw_needs.update(self.resource.meta.get('permissions', {}))
         self._raw_needs = raw_needs
+        self._principals_impl = SQLAlchemyPrincipalsImpl
 
     @cached_property
     def _needs(self):
@@ -139,31 +203,15 @@ class PrincipalManager(SQLAlchemyManager):
         permission = self._permissions['delete']
         return permission.can(item)
 
-    def relation_instances(self, item, attribute, target_resource, page=None, per_page=None):
-        query = getattr(item, attribute)
-
-        if isinstance(query, InstrumentedList):
-            if page and per_page:
-                return Pagination.from_list(query, page, per_page)
-            return query
-
-        if isinstance(target_resource.manager, PrincipalManager):
-            read_permission = target_resource.manager._permissions['read']
-            query = read_permission.apply_filters(query)
-
-        if page and per_page:
-            return query.paginate(page=page, per_page=per_page)
-        return query.all()
-
-    def paginated_instances(self, page, per_page, where=None, sort=None):
-        instances = self.instances(where=where, sort=sort)
-        if isinstance(instances, list):
-            return Pagination.from_list(instances, page, per_page)
-        return instances.paginate(page=page, per_page=per_page)
+    def _query_filter_read_permission(self, query):
+        read_permission = self._permissions['read']
+        return self._principals_impl.filter_permission(query, read_permission)
 
     def _query(self):
+        query = super(PrincipalMixin, self)._query()
+
         read_permission = self._permissions['read']
-        query = read_permission.apply_filters(self.model.query)
+        query = self._principals_impl.filter_permission(query, read_permission)
 
         if query is None:
             # abort with 403, but only if permissions for this resource are role-based.
@@ -173,49 +221,54 @@ class PrincipalManager(SQLAlchemyManager):
 
         return query
 
-    def instances(self, where=None, sort=None):
-        """
-        Applies permissions to query and returns query.
+    def relation_instances(self, item, attribute, target_resource, page=None, per_page=None):
+        query = getattr(item, attribute)
 
-        :raises HTTPException: If read access is entirely forbidden.
-        """
-        query = self._query()
+        if isinstance(query, InstrumentedList):
+            if page and per_page:
+                return Pagination.from_list(query, page, per_page)
+            return query
 
-        if query is None:
-            return []
+        target_manager = target_resource.manager
+        if isinstance(target_manager, PrincipalMixin):
+            query = target_manager._query_filter_read_permission(query)
 
-        if where:
-            query = query.filter(self._where_expression(where))
-        if sort:
-            query = query.order_by(*self._order_by(sort))
-        return query
+        if page and per_page:
+            return target_manager._query_get_paginated_items(query, page, per_page)
 
-    def read(self, id):
-        try:
-            query = self._query()
-            if query is None:
-                raise ItemNotFound(self.resource, id=id)
-            # NOTE SQLAlchemy's .get() does not work well with .filter(), therefore using .one()
-            return query.filter(self.id_column == id).one()
-        except NoResultFound:
-            raise ItemNotFound(self.resource, id=id)
+        return target_manager._query_get_all(query)
 
     def create(self, properties, commit=True):
         if not self.can_create_item(properties):
             raise Forbidden()
-        return super(PrincipalManager, self).create(properties, commit)
+        return super(PrincipalMixin, self).create(properties, commit)
 
     def update(self, item, changes, *args, **kwargs):
         if not self.can_update_item(item, changes):
             raise Forbidden()
-        return super(PrincipalManager, self).update(item, changes, *args, **kwargs)
+        return super(PrincipalMixin, self).update(item, changes, *args, **kwargs)
 
     def delete(self, item):
         if not self.can_delete_item(item):
             raise Forbidden()
-        return super(PrincipalManager, self).delete(item)
+        return super(PrincipalMixin, self).delete(item)
 
-
-class PrincipalResource(ModelResource):
-    class Meta:
-        manager = PrincipalManager
+#
+# class PrincipalsResourceMeta(ModelResourceMeta):
+#     def __new__(mcs, name, bases, members):
+#
+#         if 'Meta' in members:
+#             changes = members['Meta'].__dict__
+#
+#             print(changes)
+#
+#         print(members)
+#         class_ = super(ModelResourceMeta, mcs).__new__(mcs, name, bases, members)
+#
+#         return class_
+#
+#
+# # TODO decorate the manager with the principals mixin.
+# class PrincipalResource(six.with_metaclass(PrincipalsResourceMeta, ModelResource)):
+#     class Meta:
+#         manager = None # any manager

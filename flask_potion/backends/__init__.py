@@ -154,8 +154,81 @@ class Manager(object):
         pass
 
     def begin(self):
-
         pass
+
+
+class QueryManagerMixin(object):
+    def _query(self):
+        return None
+
+    def _condition_to_expression(self, condition):
+        raise NotImplementedError()
+
+    def _query_filter_or(self, query, expressions):
+        raise NotImplementedError()
+
+    def _query_filter_and(self, query, expressions):
+        raise NotImplementedError()
+
+    def _query_filter_by_id(self, query, id):
+        # raises ItemNotFound.
+        raise NotImplementedError()
+
+    def _query_order_by(self, query, sort):
+        raise NotImplementedError()
+
+    def _query_get_paginated_items(self, query, page, per_page):
+        raise NotImplementedError()
+
+    def _query_get_all(self, query):
+        raise NotImplementedError()
+
+    def _query_get_one(self, query):
+        raise NotImplementedError()
+
+    def _query_get_first(self, query):
+        raise NotImplementedError()
+
+    def paginated_instances(self, page, per_page, where=None, sort=None):
+        instances = self.instances(where=where, sort=sort)
+        if isinstance(instances, list):
+            return Pagination.from_list(instances, page, per_page)
+        return self._query_get_paginated_items(instances, page, per_page)
+
+    def instances(self, where=None, sort=None):
+        query = self._query()
+
+        if query is None:
+            return []
+
+        if where:
+            expressions = [self._condition_to_expression(condition) for condition in where]
+            query = self._query_filter_and(query, expressions)
+
+        if sort:
+            query = self._query_order_by(query, sort)
+
+        return query
+
+    def first(self, where=None, sort=None):
+        """
+
+        :param where:
+        :param sort:
+        :return:
+        :raises exceptions.ItemNotFound:
+        """
+        try:
+            return self._query_get_first(self.instances(where, sort))
+        except IndexError:
+            raise ItemNotFound(self.resource, where=where)
+
+    def read(self, id):
+        query = self._query()
+
+        if query is None:
+            raise ItemNotFound(self.resource, id=id)
+        return self._query_filter_by_id(query, id)
 
 
 class Pagination(object):

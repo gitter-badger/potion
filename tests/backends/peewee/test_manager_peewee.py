@@ -417,3 +417,7 @@ class PeeweeRelationTestCase(BaseTestCase):
         self.assertJSONEqual(
             [{'$ref': '/user/{}'.format(i)} for i in range(42, 50)],
             response.json)
+
+
+if __name__ == '__main__':
+    unittest.main()

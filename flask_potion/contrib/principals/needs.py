@@ -14,6 +14,9 @@ class HybridNeed(object):
     def __hash__(self):
         return hash(self.__repr__())
 
+    def identity_get_item_needs(self):
+        return None
+
     def make_expression(self, query):
         """
         :returns: SQLAlchemy expression for this Need
@@ -27,8 +30,9 @@ class HybridItemNeed(HybridNeed):
         self.method = method
         self.type = type_ or resource.meta.name
         self.resource = resource
+        self.fields = []
 
-    def _identity_get_item_needs(self):
+    def identity_get_item_needs(self):
         if self.method == 'id':
             prototype = ('id', None)
         else:
@@ -52,14 +56,6 @@ class HybridItemNeed(HybridNeed):
                self.method == other.method and \
                self.type == other.type and \
                self.resource == other.resource
-
-    def make_expression(self):
-        ids = list(self._identity_get_item_needs())
-
-        if not ids:
-            return None
-
-        return self.resource.manager.id_column.in_(ids)
 
     def __hash__(self):
         return hash(self.__repr__())
@@ -113,29 +109,6 @@ class HybridRelationshipNeed(HybridItemNeed):
 
     def extend(self, field):
         return HybridRelationshipNeed(self.method, field, *self.fields)
-
-    def make_expression(self):
-        ids = list(self._identity_get_item_needs())
-
-        if not ids:
-            return None
-
-        reversed_fields = reversed(self.fields)
-
-        target_field = next(reversed_fields)
-        target_relationship = getattr(target_field.resource.manager.model, target_field.attribute)
-
-        expression = target_relationship.has(target_field.target.manager.id_column.in_(ids))
-
-        for field in reversed_fields:
-            relationship = getattr(field.resource.manager.model, field.attribute)
-
-            if isinstance(relationship.impl, ScalarObjectAttributeImpl):
-                expression = relationship.has(expression)
-            else:
-                expression = relationship.any(expression)
-
-        return expression
 
     def __hash__(self):
         return hash((self.method, self.type, self.fields))

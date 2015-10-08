@@ -6,10 +6,11 @@ from flask_principal import Identity, identity_changed, identity_loaded, RoleNee
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import backref
 from werkzeug.exceptions import Unauthorized
+from flask.ext.potion.backends.alchemy import SQLAlchemyManager
 
 from flask_potion.routes import Relation
 from flask_potion import Api, fields
-from flask_potion.contrib.principals import PrincipalManager
+from flask_potion.contrib.principals import principals
 from flask_potion.resource import ModelResource
 from tests import ApiClient, BaseTestCase
 
@@ -30,7 +31,7 @@ class AuthorizedApiClient(ApiClient):
 
 class PrincipalResource(ModelResource):
     class Meta:
-        manager = PrincipalManager
+        manager = principals(SQLAlchemyManager)
 
 
 class PrincipalTestCase(BaseTestCase):
