@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='Flask-Potion',
-    version='0.8.1',
+    version='0.9.0',
     packages=find_packages(exclude=['*tests*']),
     url='http://potion.readthedocs.org/en/latest/',
     license='MIT',
@@ -18,6 +18,7 @@ setup(
         'Flask-Testing>=0.4.1',
         'Flask-Principal>=0.4.0',
         'Flask-SQLAlchemy>=2.0',
+        'Flask-MongoEngine>=0.7.1',
         'peewee>=2.6.3',
         'nose>=1.1.2',
     ],
@@ -53,6 +54,9 @@ setup(
         ],
         'peewee': [
             'peewee>=2.6.3'
-        ]
+        ],
+        'mongoengine': [
+            'Flask-MongoEngine>=0.7.0'
+        ],
     }
 )
