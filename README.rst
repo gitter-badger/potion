@@ -117,3 +117,8 @@ Potion is written and maintained by `Lars Schöning <https://github.com/lyschoen
 `MongoEngine <http://mongoengine.org/>`_ backend support has been contributed by `João Cardoso <https://github.com/joaocardoso>`_.
 
 `See here for the full list of contributors <https://github.com/biosustain/potion/graphs/contributors>`_.
+
+
+.. image:: https://badges.gitter.im/Join%20Chat.svg
+   :alt: Join the chat at https://gitter.im/biosustain/potion
+   :target: https://gitter.im/biosustain/potion?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge
